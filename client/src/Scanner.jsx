@@ -31,24 +31,6 @@ export default function Scanner({ studentId, onPointsChanged }) {
     },
   });
 
-  // --- camera lifecycle -----------------------------------------------------
-  async function startCamera() {
-    if (startedRef.current) return;
-    const instance = new Html5Qrcode(REGION_ID, { verbose: false });
-    scannerRef.current = instance;
-    try {
-      await instance.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1 },
-        onScan,
-        () => {} // per-frame decode failures: ignore
-      );
-      startedRef.current = true;
-    } catch (e) {
-      setErrorMsg("Camera unavailable. Check browser permissions.");
-    }
-  }
-
   function onScan(decodedText) {
     // guard against the same code firing repeatedly while we process
     if (claim.isPending || frozen) return;
@@ -82,14 +64,53 @@ export default function Scanner({ studentId, onPointsChanged }) {
     resumeCamera();
   }
 
-  useEffect(() => {
-    startCamera();
-    return () => {
-      const inst = scannerRef.current;
-      if (inst) {
-        inst.stop().catch(() => {}).finally(() => inst.clear?.());
+useEffect(() => {
+    let isMounted = true;
+    let startPromise = null; // Track the initialization promise
+
+    async function startCamera() {
+      if (startedRef.current) return;
+      startedRef.current = true; // Lock immediately to prevent double-firing in Strict Mode
+
+      const instance = new Html5Qrcode(REGION_ID, { verbose: false });
+      scannerRef.current = instance;
+
+      try {
+        // Capture the promise so we can wait for it in cleanup
+        startPromise = instance.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1 },
+          onScan,
+          () => {} // per-frame decode failures: ignore
+        );
+        
+        await startPromise;
+      } catch (e) {
+        if (isMounted) {
+          setErrorMsg("Camera unavailable. Check browser permissions.");
+        }
       }
+    }
+
+    startCamera();
+
+    // Cleanup function
+    return () => {
+      isMounted = false;
       startedRef.current = false;
+      const inst = scannerRef.current;
+
+      if (inst && startPromise) {
+        // Wait for the camera to finish starting before we try to stop it
+        startPromise
+          .then(() => {
+            inst.stop().catch(() => {}).finally(() => inst.clear?.());
+          })
+          .catch(() => {
+            // If it failed to start, just clear the UI
+            inst.clear?.();
+          });
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

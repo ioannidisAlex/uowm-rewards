@@ -6,10 +6,12 @@
 //   POST /api/login          { studentId }            -> { token, studentId, points }
 //   GET  /api/me?studentId   (header x-student-id)    -> { studentId, points, history }
 //   POST /api/claim-reward   { studentId, code }      -> { points, awarded, message }
+//   GET  /api/qr/:code                                -> PNG image of the QR code
 // ============================================================================
 
 const express = require("express");
 const cors = require("cors");
+const QRCode = require("qrcode");
 
 const app = express();
 app.use(cors());
