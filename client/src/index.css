@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #160b2e;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tame the html5-qrcode injected UI so it matches our viewfinder. */
+#qr-reader {
+  border: none !important;
+}
+#qr-reader video {
+  border-radius: 1.5rem;
+  object-fit: cover;
+}
+#qr-reader__dashboard_section_csr button {
+  background: #c6ff3d !important;
+  color: #160b2e !important;
+  border: none !important;
+  border-radius: 9999px !important;
+  padding: 0.5rem 1rem !important;
+  font-weight: 600 !important;
+}
+#qr-reader img[alt="Info icon"],
+#qr-reader__status_span {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
