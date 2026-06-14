@@ -24,13 +24,14 @@ async function setup() {
   await run("PRAGMA foreign_keys = ON");
 
   await run(`CREATE TABLE IF NOT EXISTS students (
-    student_id   TEXT NOT NULL PRIMARY KEY,
-    full_name    TEXT,
-    email        TEXT UNIQUE,
-    total_points INTEGER NOT NULL DEFAULT 0,
-    role         TEXT NOT NULL DEFAULT 'student',
-    airtable_id  TEXT,
-    created_at   TEXT DEFAULT (datetime('now'))
+    student_id     TEXT NOT NULL PRIMARY KEY,
+    full_name      TEXT,
+    email          TEXT UNIQUE,
+    total_points   INTEGER NOT NULL DEFAULT 0,
+    role           TEXT NOT NULL DEFAULT 'student',
+    wallet_address TEXT,
+    airtable_id    TEXT,
+    created_at     TEXT DEFAULT (datetime('now'))
   )`);
 
   await run(`CREATE TABLE IF NOT EXISTS courses (

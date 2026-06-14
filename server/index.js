@@ -1,9 +1,11 @@
 // UOWM Rewards — API server (sqlite3 edition)
 require("dotenv").config();
-const http    = require("http");
-const url     = require("url");
-const path    = require("path");
-const sqlite3 = require("sqlite3").verbose();
+const http       = require("http");
+const url        = require("url");
+const path       = require("path");
+const sqlite3    = require("sqlite3").verbose();
+const blockchain = require("./blockchain");
+blockchain.init();
 
 const DB_PATH = path.join(__dirname, "./db/uowm_rewards.db");
 const db      = new sqlite3.Database(DB_PATH, (err) => {
@@ -112,7 +114,7 @@ http.createServer(async (req, res) => {
       const { studentId, code } = await readBody(req);
       const id        = norm(studentId);
       const lectureId = (code || "").trim().toUpperCase();
-      const s = await q("SELECT student_id, total_points FROM students WHERE student_id = ?", [id]);
+      const s = await q("SELECT student_id, total_points, wallet_address FROM students WHERE student_id = ?", [id]);
       if (!s)         return send(res, 401, { message: "Not authenticated." });
       if (!lectureId) return send(res, 400, { message: "Empty QR code." });
       const lec = await q("SELECT lecture_id, attendance_open FROM lectures WHERE lecture_id = ?", [lectureId]);
@@ -131,6 +133,12 @@ http.createServer(async (req, res) => {
       await qr("UPDATE students SET total_points = total_points + ? WHERE student_id = ?", [POINTS_PER_SCAN, id]);
       const updated = await q("SELECT total_points FROM students WHERE student_id = ?", [id]);
       log("CLAIM:OK", "Points awarded", { studentId: id, lectureId, awarded: POINTS_PER_SCAN, total: updated.total_points });
+
+      // Mint on-chain — fire-and-forget, response is not delayed
+      blockchain.awardOnChain(s.wallet_address, POINTS_PER_SCAN, lectureId).then((txHash) => {
+        if (txHash) qr("UPDATE token_transactions SET blockchain_hash=? WHERE transaction_id=?", [txHash, txId]);
+      });
+
       return send(res, 200, { awarded: POINTS_PER_SCAN, points: updated.total_points, message: `+${POINTS_PER_SCAN} points added` });
     }
 
@@ -253,10 +261,17 @@ http.createServer(async (req, res) => {
       await qr("INSERT INTO token_transactions (transaction_id,student_id,attendance_id,transaction_type,points,transaction_date,status) VALUES (?,?,?,'Attendance',?,date('now'),'Confirmed')",
         [txId, r.student_id, attId, POINTS_PER_SCAN]);
       await qr("UPDATE students SET total_points = total_points + ? WHERE student_id = ?", [POINTS_PER_SCAN, r.student_id]);
-      const updated = await q("SELECT total_points FROM students WHERE student_id = ?", [r.student_id]);
+      const updated  = await q("SELECT total_points FROM students WHERE student_id = ?", [r.student_id]);
+      const student  = await q("SELECT wallet_address FROM students WHERE student_id = ?", [r.student_id]);
       await qr("UPDATE scan_requests SET status='approved', awarded=?, points_after=?, resolved_at=datetime('now') WHERE request_id=?",
         [POINTS_PER_SCAN, updated.total_points, reqId]);
       log("SCAN:APPROVED", "Points awarded via approval", { studentId: r.student_id, lectureId: r.lecture_id, awarded: POINTS_PER_SCAN, total: updated.total_points });
+
+      // Mint on-chain — fire-and-forget
+      blockchain.awardOnChain(student.wallet_address, POINTS_PER_SCAN, r.lecture_id).then((txHash) => {
+        if (txHash) qr("UPDATE token_transactions SET blockchain_hash=? WHERE transaction_id=?", [txHash, txId]);
+      });
+
       return send(res, 200, { awarded: POINTS_PER_SCAN, points: updated.total_points });
     }
 
@@ -270,6 +285,36 @@ http.createServer(async (req, res) => {
       await qr("UPDATE scan_requests SET status='rejected', resolved_at=datetime('now') WHERE request_id=?", [reqId]);
       log("SCAN:REJECTED", "Scan rejected", { reqId });
       return send(res, 200, {});
+    }
+
+    // POST /api/wallet — student registers their MetaMask wallet address
+    if (req.method === "POST" && pathname === "/api/wallet") {
+      const { studentId, walletAddress } = await readBody(req);
+      const id = norm(studentId);
+      if (!id) return send(res, 401, { message: "Not authenticated." });
+      const { ethers } = require("ethers");
+      if (!walletAddress || !ethers.isAddress(walletAddress))
+        return send(res, 400, { message: "Invalid Ethereum address." });
+      const s = await q("SELECT student_id FROM students WHERE student_id = ?", [id]);
+      if (!s) return send(res, 401, { message: "Not authenticated." });
+      await qr("UPDATE students SET wallet_address = ? WHERE student_id = ?", [walletAddress, id]);
+      log("WALLET:SET", "Wallet registered", { studentId: id, walletAddress });
+      return send(res, 200, { walletAddress });
+    }
+
+    // GET /api/wallet/:studentId — fetch a student's registered wallet + on-chain explorer link
+    const walletRegMatch = pathname.match(/^\/api\/wallet\/(.+)$/);
+    if (req.method === "GET" && walletRegMatch) {
+      const id = norm(walletRegMatch[1]);
+      const s = await q("SELECT wallet_address FROM students WHERE student_id = ?", [id]);
+      if (!s) return send(res, 404, { message: "Student not found." });
+      const network     = process.env.BLOCKCHAIN_NETWORK || "sepolia";
+      const explorerUrl = s.wallet_address
+        ? (network === "amoy"
+            ? `https://amoy.polygonscan.com/address/${s.wallet_address}`
+            : `https://sepolia.etherscan.io/address/${s.wallet_address}`)
+        : null;
+      return send(res, 200, { walletAddress: s.wallet_address || null, explorerUrl });
     }
 
     // GET /api/visit
