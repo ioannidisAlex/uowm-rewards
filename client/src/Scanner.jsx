@@ -1,132 +1,127 @@
 import { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 import { useMutation } from "@tanstack/react-query";
-import { claimReward } from "./api";
+import { submitScan, pollScanStatus } from "./api";
 
 const REGION_ID = "qr-reader";
 
 export default function Scanner({ studentId, onPointsChanged }) {
-  const scannerRef = useRef(null);
-  const startedRef = useRef(false);
+  const scannerRef  = useRef(null);
+  const startedRef  = useRef(false);
   const lastCodeRef = useRef(null);
 
-  const [frozen, setFrozen] = useState(false); // camera paused after a read
-  const [success, setSuccess] = useState(null); // { awarded } -> shows modal
-  const [errorMsg, setErrorMsg] = useState(null); // red banner text
+  const [frozen,         setFrozen]         = useState(false);
+  const [success,        setSuccess]        = useState(null);   // { awarded }
+  const [errorMsg,       setErrorMsg]       = useState(null);
+  const [pendingRequest, setPendingRequest] = useState(null);   // { requestId }
 
-  const claim = useMutation({
-    mutationFn: (code) => claimReward(studentId, code),
+  // ── submit scan to server (creates pending approval) ─────────────────────────
+  const submit = useMutation({
+    mutationFn: (code) => submitScan(studentId, code),
     onSuccess: (data) => {
       setErrorMsg(null);
-      setSuccess({ awarded: data.awarded });
-      onPointsChanged?.(data.points);
+      setPendingRequest({ requestId: data.requestId });
     },
     onError: (err) => {
       setErrorMsg(err.message);
-      // auto-dismiss the banner and let them rescan
-      setTimeout(() => {
-        setErrorMsg(null);
-        resumeCamera();
-      }, 2200);
+      setTimeout(() => { setErrorMsg(null); resumeCamera(); }, 2200);
     },
   });
 
-  function onScan(decodedText) {
-    // guard against the same code firing repeatedly while we process
-    if (claim.isPending || frozen) return;
-    if (decodedText === lastCodeRef.current && success) return;
+  // ── poll for teacher's decision every 2 s ────────────────────────────────────
+  useEffect(() => {
+    if (!pendingRequest) return;
 
+    const interval = setInterval(async () => {
+      try {
+        const data = await pollScanStatus(pendingRequest.requestId);
+        if (data.status === "approved") {
+          clearInterval(interval);
+          setPendingRequest(null);
+          setSuccess({ awarded: data.awarded });
+          onPointsChanged?.(data.points);
+        } else if (data.status === "rejected") {
+          clearInterval(interval);
+          setPendingRequest(null);
+          setErrorMsg("Scan was rejected by the teacher.");
+          setTimeout(() => { setErrorMsg(null); resumeCamera(); }, 2500);
+        }
+      } catch { /* ignore network blips */ }
+    }, 2000);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRequest]);
+
+  // ── camera callbacks ──────────────────────────────────────────────────────────
+  function onScan(decodedText) {
+    if (submit.isPending || frozen || pendingRequest) return;
+    if (decodedText === lastCodeRef.current && success) return;
     lastCodeRef.current = decodedText;
     setFrozen(true);
     pauseCamera();
-    claim.mutate(decodedText);
+    submit.mutate(decodedText);
   }
 
-  function pauseCamera() {
-    try {
-      scannerRef.current?.pause(true);
-    } catch {
-      /* not running */
-    }
-  }
+  function pauseCamera()  { try { scannerRef.current?.pause(true); } catch {} }
   function resumeCamera() {
     setFrozen(false);
-    try {
-      scannerRef.current?.resume();
-    } catch {
-      /* not running */
-    }
+    try { scannerRef.current?.resume(); } catch {}
   }
-
   function scanNext() {
     setSuccess(null);
     lastCodeRef.current = null;
     resumeCamera();
   }
 
-useEffect(() => {
-    let isMounted = true;
-    let startPromise = null; // Track the initialization promise
+  // ── camera lifecycle ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    let isMounted    = true;
+    let startPromise = null;
 
     async function startCamera() {
       if (startedRef.current) return;
-      startedRef.current = true; // Lock immediately to prevent double-firing in Strict Mode
-
+      startedRef.current = true;
       const instance = new Html5Qrcode(REGION_ID, { verbose: false });
       scannerRef.current = instance;
-
       try {
-        // Capture the promise so we can wait for it in cleanup
         startPromise = instance.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1 },
           onScan,
-          () => {} // per-frame decode failures: ignore
+          () => {}
         );
-        
         await startPromise;
-      } catch (e) {
-        if (isMounted) {
-          setErrorMsg("Camera unavailable. Check browser permissions.");
-        }
+      } catch {
+        if (isMounted) setErrorMsg("Camera unavailable. Check browser permissions.");
       }
     }
 
     startCamera();
 
-    // Cleanup function
     return () => {
       isMounted = false;
       startedRef.current = false;
       const inst = scannerRef.current;
-
       if (inst && startPromise) {
-        // Wait for the camera to finish starting before we try to stop it
         startPromise
-          .then(() => {
-            inst.stop().catch(() => {}).finally(() => inst.clear?.());
-          })
-          .catch(() => {
-            // If it failed to start, just clear the UI
-            inst.clear?.();
-          });
+          .then(() => inst.stop().catch(() => {}).finally(() => inst.clear?.()))
+          .catch(() => inst.clear?.());
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── render ────────────────────────────────────────────────────────────────────
   return (
     <div className="relative flex flex-1 flex-col px-6 pt-8">
       <header className="relative z-20 mb-6">
         <h2 className="font-display text-2xl font-bold text-white">Point your camera</h2>
-        <p className="font-display text-sm text-mist">
-          Line up a reward QR inside the frame.
-        </p>
+        <p className="font-display text-sm text-mist">Line up a reward QR inside the frame.</p>
       </header>
 
       {/* Viewfinder */}
       <div className="relative mx-auto aspect-square w-full max-w-sm">
-        {/* dimmed overlay + corner guides */}
         <div className="pointer-events-none absolute inset-0 z-10 rounded-3xl ring-[3000px] ring-ink/70">
           <Corner className="left-2 top-2 rotate-0" />
           <Corner className="right-2 top-2 rotate-90" />
@@ -137,14 +132,21 @@ useEffect(() => {
           )}
         </div>
 
-        <div
-          id={REGION_ID}
-          className="h-full w-full overflow-hidden rounded-3xl bg-black"
-        />
+        <div id={REGION_ID} className="h-full w-full overflow-hidden rounded-3xl bg-black" />
 
-        {frozen && !success && !errorMsg && (
+        {/* "Reading…" — only while submitting, before we get a requestId */}
+        {frozen && !pendingRequest && !success && !errorMsg && (
           <div className="absolute inset-0 z-20 grid place-items-center rounded-3xl bg-ink/60">
             <p className="font-display font-semibold text-lime">Reading…</p>
+          </div>
+        )}
+
+        {/* "Awaiting approval" — while teacher hasn't acted yet */}
+        {pendingRequest && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl bg-ink/85 px-6 text-center">
+            <div className="h-9 w-9 rounded-full border-4 border-lime/25 border-t-lime animate-spin" />
+            <p className="font-display font-semibold text-lime">Awaiting approval</p>
+            <p className="font-mono text-xs text-mist">Teacher is reviewing your scan…</p>
           </div>
         )}
       </div>
@@ -166,9 +168,7 @@ useEffect(() => {
           <div className="animate-pop text-center">
             <div className="mb-4 text-7xl">🎉</div>
             <p className="font-mono text-sm uppercase tracking-[0.3em]">Reward claimed</p>
-            <p className="mt-2 font-display text-6xl font-bold">
-              +{success.awarded}
-            </p>
+            <p className="mt-2 font-display text-6xl font-bold">+{success.awarded}</p>
             <p className="font-display text-xl font-semibold">points added</p>
           </div>
           <button
@@ -186,8 +186,6 @@ useEffect(() => {
 
 function Corner({ className }) {
   return (
-    <span
-      className={`absolute h-7 w-7 rounded-tl-xl border-l-4 border-t-4 border-lime ${className}`}
-    />
+    <span className={`absolute h-7 w-7 rounded-tl-xl border-l-4 border-t-4 border-lime ${className}`} />
   );
 }

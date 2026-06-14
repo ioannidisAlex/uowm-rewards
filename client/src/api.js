@@ -1,15 +1,16 @@
 // Thin wrapper around fetch. All calls go to relative /api (Vite proxies in dev).
 
-const STORAGE_KEY = "qr_rewards_student_id";
+const STORAGE_KEY = "qr_rewards_user";
 
-export function getStoredStudentId() {
-  return localStorage.getItem(STORAGE_KEY);
+export function getStoredUser() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; }
 }
-export function setStoredStudentId(id) {
-  localStorage.setItem(STORAGE_KEY, id);
+export function setStoredUser(user) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
 }
-export function clearStoredStudentId() {
+export function clearStoredUser() {
   localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem("qr_rewards_student_id"); // clean up old key
 }
 
 async function asJson(res) {
@@ -27,7 +28,6 @@ async function asJson(res) {
   return data;
 }
 
-// The handshake.
 export function login(studentId) {
   return fetch("/api/login", {
     method: "POST",
@@ -36,16 +36,50 @@ export function login(studentId) {
   }).then(asJson);
 }
 
-// Dashboard data.
 export function fetchMe(studentId) {
   return fetch(`/wallet/${encodeURIComponent(studentId)}`).then(asJson);
 }
 
-// Scan claim. studentId is always attached to the payload.
+export function submitScan(studentId, code) {
+  return fetch("/api/scan-request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ studentId, code }),
+  }).then(asJson);
+}
+
+export function pollScanStatus(requestId) {
+  return fetch(`/api/scan-request/${encodeURIComponent(requestId)}/status`).then(asJson);
+}
+
+export function fetchPendingScans() {
+  return fetch("/api/scan-requests/pending").then(asJson);
+}
+
+export function approveScan(requestId) {
+  return fetch(`/api/scan-requests/${encodeURIComponent(requestId)}/approve`, { method: "POST" }).then(asJson);
+}
+
+export function rejectScan(requestId) {
+  return fetch(`/api/scan-requests/${encodeURIComponent(requestId)}/reject`, { method: "POST" }).then(asJson);
+}
+
 export function claimReward(studentId, code) {
   return fetch("/api/claim-reward", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ studentId, code }),
   }).then(asJson);
+}
+
+export function fetchAttendance(lectureId) {
+  return fetch(`/api/attendance?lectureId=${encodeURIComponent(lectureId)}`).then(asJson);
+}
+
+export function fetchAdminStudents() {
+  return fetch("/api/admin/students").then(asJson);
+}
+
+export function fetchAdminTransactions() {
+  return fetch("/api/admin/transactions").then(asJson);
 }

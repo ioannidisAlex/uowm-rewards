@@ -3,37 +3,37 @@ import { useQueryClient } from "@tanstack/react-query";
 import Gatekeeper from "./Gatekeeper";
 import Scanner from "./Scanner";
 import Dashboard from "./Dashboard";
-import LectureQRs from "./LectureQRs";
-import { getStoredStudentId, clearStoredStudentId } from "./api";
+import TeacherApp from "./TeacherApp";
+import AdminApp from "./AdminApp";
+import { getStoredUser, clearStoredUser } from "./api";
 
 export default function App() {
-  const [studentId, setStudentId] = useState(getStoredStudentId());
+  const [user, setUser] = useState(() => getStoredUser());
   const [tab, setTab] = useState("scan");
   const [livePoints, setLivePoints] = useState(null);
   const qc = useQueryClient();
 
-  if (!studentId) {
-    return <Gatekeeper onEnter={setStudentId} />;
-  }
-
-  const handlePointsChanged = (points) => {
-    setLivePoints(points);
-    qc.invalidateQueries({ queryKey: ["me", studentId] });
-  };
+  if (!user) return <Gatekeeper onEnter={setUser} />;
 
   const signOut = () => {
-    clearStoredStudentId();
-    setStudentId(null);
+    clearStoredUser();
+    setUser(null);
     setLivePoints(null);
+  };
+
+  if (user.role === "teacher") return <TeacherApp user={user} onSignOut={signOut} />;
+  if (user.role === "admin")   return <AdminApp   user={user} onSignOut={signOut} />;
+
+  // student
+  const handlePointsChanged = (points) => {
+    setLivePoints(points);
+    qc.invalidateQueries({ queryKey: ["me", user.studentId] });
   };
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-ink text-white">
-      {/* Top bar */}
       <div className="relative z-20 flex items-center justify-between px-6 pt-6">
-        <span className="font-mono text-xs uppercase tracking-[0.3em] text-lime">
-          QR Rewards
-        </span>
+        <span className="font-mono text-xs uppercase tracking-[0.3em] text-lime">QR Rewards</span>
         <button
           onClick={signOut}
           className="font-mono text-xs text-mist underline-offset-4 hover:underline"
@@ -42,19 +42,15 @@ export default function App() {
         </button>
       </div>
 
-      {/* Active view */}
       <div className="flex flex-1 flex-col pb-24">
-        {tab === "scan" && <Scanner studentId={studentId} onPointsChanged={handlePointsChanged} />}
-        {tab === "dash" && <Dashboard studentId={studentId} livePoints={livePoints} />}
-        {tab === "qr"   && <LectureQRs />}
+        {tab === "scan" && <Scanner studentId={user.studentId} onPointsChanged={handlePointsChanged} />}
+        {tab === "dash" && <Dashboard studentId={user.studentId} livePoints={livePoints} />}
       </div>
 
-      {/* Bottom tab bar */}
       <nav className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-md border-t border-white/10 bg-ink2/95 backdrop-blur">
-        <div className="grid grid-cols-3">
+        <div className="grid grid-cols-2">
           <TabButton active={tab === "scan"} onClick={() => setTab("scan")} label="Scan"   icon="◎" />
           <TabButton active={tab === "dash"} onClick={() => setTab("dash")} label="Points" icon="▦" />
-          <TabButton active={tab === "qr"}   onClick={() => setTab("qr")}   label="QR"     icon="⊞" />
         </div>
       </nav>
     </div>

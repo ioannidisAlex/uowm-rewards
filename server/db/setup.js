@@ -28,6 +28,7 @@ async function setup() {
     full_name    TEXT,
     email        TEXT UNIQUE,
     total_points INTEGER NOT NULL DEFAULT 0,
+    role         TEXT NOT NULL DEFAULT 'student',
     airtable_id  TEXT,
     created_at   TEXT DEFAULT (datetime('now'))
   )`);
@@ -99,6 +100,17 @@ async function setup() {
     created_at          TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (student_id)    REFERENCES students  (student_id),
     FOREIGN KEY (attendance_id) REFERENCES attendance (attendance_id) ON DELETE SET NULL
+  )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS scan_requests (
+    request_id   TEXT NOT NULL PRIMARY KEY,
+    student_id   TEXT NOT NULL,
+    lecture_id   TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    awarded      INTEGER NOT NULL DEFAULT 0,
+    points_after INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT DEFAULT (datetime('now')),
+    resolved_at  TEXT
   )`);
 
   await run(`CREATE TABLE IF NOT EXISTS visit_log (
@@ -177,6 +189,16 @@ async function setup() {
   for (const [id, name, email, aid] of students)
     await run("INSERT OR REPLACE INTO students (student_id,full_name,email,airtable_id) VALUES (?,?,?,?)", [id,name,email,aid]);
   console.log(`✅ Students: ${students.length} rows`);
+
+  // TEACHERS & ADMIN
+  const staff = [
+    ["tchr001", "ΑΝΤΩΝΙΑΔΗΣ ΙΩΑΝΝΗΣ",       "tchr001@uowm.gr", "teacher"],
+    ["tchr002", "ΚΑΘΗΓΗΤΗΣ",     "tchr002@uowm.gr", "teacher"],
+    ["admin",   "ΔΙΑΧΕΙΡΙΣΤΗΣ ΣΥΣΤΗΜΑΤΟΣ",     "admin@uowm.gr",   "admin"],
+  ];
+  for (const [id, name, email, role] of staff)
+    await run("INSERT OR REPLACE INTO students (student_id,full_name,email,role) VALUES (?,?,?,?)", [id, name, email, role]);
+  console.log(`✅ Staff: ${staff.length} rows (teachers + admin)`);;
 
   // COURSE
   await run("INSERT OR REPLACE INTO courses (course_id,course_name,department,semester,status,airtable_id) VALUES (?,?,?,?,?,?)",

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { login, setStoredStudentId } from "./api";
+import { login, setStoredUser } from "./api";
 
 export default function Gatekeeper({ onEnter }) {
   const [id, setId] = useState("");
@@ -8,8 +8,9 @@ export default function Gatekeeper({ onEnter }) {
   const m = useMutation({
     mutationFn: (studentId) => login(studentId),
     onSuccess: (data) => {
-      setStoredStudentId(data.studentId);
-      onEnter(data.studentId);
+      const user = { studentId: data.studentId, role: data.role || "student" };
+      setStoredUser(user);
+      onEnter(user);
     },
   });
 
