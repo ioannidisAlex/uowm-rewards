@@ -124,6 +124,24 @@ http.createServer(async (req, res) => {
       return send(res, 200, { awarded: POINTS_PER_SCAN, points: updated.total_points, message: `+${POINTS_PER_SCAN} points added` });
     }
 
+    // GET /wallet/:studentId
+    const walletMatch = pathname.match(/^\/wallet\/(.+)$/);
+    if (req.method === "GET" && walletMatch) {
+      const id = norm(walletMatch[1]);
+      if (!id) return send(res, 400, { message: "Student ID is required." });
+      const s = await q("SELECT student_id, full_name, email, total_points FROM students WHERE student_id = ?", [id]);
+      if (!s) return send(res, 404, { message: "Student not found." });
+      const history = await qa(`
+        SELECT t.transaction_id, t.transaction_type, t.points, t.transaction_date,
+               l.lecture_id, l.topic
+        FROM token_transactions t
+        LEFT JOIN attendance a ON a.attendance_id = t.attendance_id
+        LEFT JOIN lectures   l ON l.lecture_id    = a.lecture_id
+        WHERE t.student_id = ? ORDER BY t.created_at DESC LIMIT 50`, [id]);
+      log("WALLET", "Wallet fetched", { studentId: id });
+      return send(res, 200, { studentId: s.student_id, name: s.full_name, email: s.email, points: s.total_points, history });
+    }
+
     // GET /api/visit
     if (req.method === "GET" && pathname === "/api/visit") {
       const id        = norm(query.studentId);

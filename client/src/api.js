@@ -38,7 +38,7 @@ export function login(studentId) {
 
 // Dashboard data.
 export function fetchMe(studentId) {
-  return fetch(`/api/me?studentId=${encodeURIComponent(studentId)}`).then(asJson);
+  return fetch(`/wallet/${encodeURIComponent(studentId)}`).then(asJson);
 }
 
 // Scan claim. studentId is always attached to the payload.

@@ -9,6 +9,7 @@ export default defineConfig({
     allowedHosts: ["mouth-approach-haunt.ngrok-free.dev"],
     proxy: {
       "/api": "http://localhost:4000",
+      "/wallet": "http://localhost:4000",
     },
   },
   allowedHosts: [".ngrok-free.dev"]

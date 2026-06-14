@@ -90,10 +90,13 @@ async function setup() {
     transaction_type TEXT,
     points           INTEGER NOT NULL DEFAULT 0,
     transaction_date TEXT,
-    status           TEXT DEFAULT 'Confirmed',
-    streak_cycle     TEXT,
-    airtable_id      TEXT,
-    created_at       TEXT DEFAULT (datetime('now')),
+    status              TEXT DEFAULT 'Confirmed',
+    streak_cycle        TEXT,
+    verification_id     TEXT,
+    blockchain_hash     TEXT,
+    verification_status TEXT,
+    airtable_id         TEXT,
+    created_at          TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (student_id)    REFERENCES students  (student_id),
     FOREIGN KEY (attendance_id) REFERENCES attendance (attendance_id) ON DELETE SET NULL
   )`);
