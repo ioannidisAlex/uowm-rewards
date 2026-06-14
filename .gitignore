@@ -20,3 +20,8 @@ client/.vite/
 # Logs
 *.log
 npm-debug.log*
+
+#db
+*.db
+*.db-shm
+*.db-wal

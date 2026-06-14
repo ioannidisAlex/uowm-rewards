@@ -1,116 +1,149 @@
-// ============================================================================
-// Student QR Rewards — Node.js backend
-// Plain Express. No DB. In-memory student "table" + claimed-code ledger.
-// ----------------------------------------------------------------------------
-// Endpoints
-//   POST /api/login          { studentId }            -> { token, studentId, points }
-//   GET  /api/me?studentId   (header x-student-id)    -> { studentId, points, history }
-//   POST /api/claim-reward   { studentId, code }      -> { points, awarded, message }
-//   GET  /api/qr/:code                                -> PNG image of the QR code
-// ============================================================================
+// UOWM Rewards — API server (sqlite3 edition)
+require("dotenv").config();
+const http    = require("http");
+const url     = require("url");
+const path    = require("path");
+const sqlite3 = require("sqlite3").verbose();
 
-const express = require("express");
-const cors = require("cors");
-const QRCode = require("qrcode");
+const DB_PATH = path.join(__dirname, "./db/uowm_rewards.db");
+const db      = new sqlite3.Database(DB_PATH, (err) => {
+  if (err) { console.error("DB open failed:", err.message); process.exit(1); }
+});
+db.run("PRAGMA journal_mode = WAL");
+db.run("PRAGMA foreign_keys = ON");
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// --- "Database": a flat array of valid students -----------------------------
-const students = {
-  mst01081: { studentId: "mst01081", name: "Demo Student", points: 0, history: [] },
-  mst02042: { studentId: "mst02042", name: "Test Student", points: 120, history: [] },
-};
-
-// Tracks which (studentId|code) pairs have already been claimed.
-const claimed = new Set();
-
-// Points granted per valid scan.
 const POINTS_PER_SCAN = 50;
 
-// Un-hashed pseudo-JWT. Deliberately NOT cryptographic — this is a demo handshake.
-function makeToken(studentId) {
-  const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
-  const payload = Buffer.from(
-    JSON.stringify({ sub: studentId, iat: Date.now() })
-  ).toString("base64url");
-  return `${header}.${payload}.`;
+// ---------------------------------------------------------------------------
+// Promise wrappers
+// ---------------------------------------------------------------------------
+const q  = (sql, p = []) => new Promise((res, rej) => db.get(sql, p, (e, r) => e ? rej(e) : res(r)));
+const qa = (sql, p = []) => new Promise((res, rej) => db.all(sql, p, (e, r) => e ? rej(e) : res(r)));
+const qr = (sql, p = []) => new Promise((res, rej) => db.run(sql, p, function(e) { e ? rej(e) : res(this); }));
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function log(tag, msg, extra = "") {
+  console.log(`[${new Date().toISOString()}] [${tag}] ${msg}${extra ? " | " + JSON.stringify(extra) : ""}`);
 }
-
-// ---------------------------------------------------------------------------
-// POST /api/login — the handshake. Validates the ID exists, returns a token.
-// ---------------------------------------------------------------------------
-app.post("/api/login", (req, res) => {
-  const studentId = String(req.body?.studentId || "").trim().toLowerCase();
-  if (!studentId) {
-    return res.status(400).json({ message: "Enter a student ID." });
-  }
-  const student = students[studentId];
-  if (!student) {
-    return res.status(404).json({ message: "That student ID isn't on the roster." });
-  }
-  return res.json({
-    token: makeToken(studentId),
-    studentId: student.studentId,
-    points: student.points,
+function send(res, status, body) {
+  const p = JSON.stringify(body);
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(p),
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
   });
-});
-
-// ---------------------------------------------------------------------------
-// GET /api/me — current balance + scan history for the dashboard.
-// ---------------------------------------------------------------------------
-app.get("/api/me", (req, res) => {
-  const studentId = String(
-    req.query.studentId || req.header("x-student-id") || ""
-  ).trim().toLowerCase();
-  const student = students[studentId];
-  if (!student) {
-    return res.status(404).json({ message: "Unknown student." });
-  }
-  return res.json({
-    studentId: student.studentId,
-    points: student.points,
-    history: student.history,
+  res.end(p);
+}
+function redirect(res, loc) {
+  res.writeHead(302, { "Location": loc, "Access-Control-Allow-Origin": "*" });
+  res.end();
+}
+async function readBody(req) {
+  return new Promise((res) => {
+    let raw = "";
+    req.on("data", c => raw += c);
+    req.on("end", () => { try { res(JSON.parse(raw)); } catch { res({}); } });
   });
-});
+}
+const norm = id => (id || "").trim().toLowerCase();
 
 // ---------------------------------------------------------------------------
-// POST /api/claim-reward — the scan payload lands here.
+// Server
 // ---------------------------------------------------------------------------
-app.post("/api/claim-reward", (req, res) => {
-  const studentId = String(req.body?.studentId || "").trim().toLowerCase();
-  const code = String(req.body?.code || "").trim();
+http.createServer(async (req, res) => {
+  const { pathname, query } = url.parse(req.url, true);
 
-  const student = students[studentId];
-  if (!student) {
-    return res.status(401).json({ message: "Session expired. Sign in again." });
-  }
-  if (!code) {
-    return res.status(400).json({ message: "Empty QR code. Try again." });
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" });
+    return res.end();
   }
 
-  const ledgerKey = `${studentId}|${code}`;
-  if (claimed.has(ledgerKey)) {
-    return res.status(409).json({ message: "This code was already used." });
+  try {
+    // GET /health
+    if (req.method === "GET" && pathname === "/health") {
+      const r = await q("SELECT COUNT(*) AS n FROM students");
+      return send(res, 200, { status: "ok", db: "sqlite3", students: r.n });
+    }
+
+    // POST /api/login
+    if (req.method === "POST" && pathname === "/api/login") {
+      const { studentId } = await readBody(req);
+      const id = norm(studentId);
+      if (!id) return send(res, 400, { message: "Student ID is required." });
+      const s = await q("SELECT student_id, full_name, email, total_points FROM students WHERE student_id = ?", [id]);
+      if (!s) return send(res, 401, { message: "Unknown student ID." });
+      log("LOGIN", "Logged in", { studentId: id });
+      return send(res, 200, { token: id, studentId: id, name: s.full_name, points: s.total_points });
+    }
+
+    // GET /api/me
+    if (req.method === "GET" && pathname === "/api/me") {
+      const id = norm(query.studentId);
+      if (!id) return send(res, 401, { message: "Not authenticated." });
+      const s = await q("SELECT student_id, full_name, email, total_points FROM students WHERE student_id = ?", [id]);
+      if (!s) return send(res, 401, { message: "Not authenticated." });
+      const history = await qa(`
+        SELECT t.transaction_id, t.transaction_type, t.points, t.transaction_date,
+               l.lecture_id, l.topic
+        FROM token_transactions t
+        LEFT JOIN attendance a ON a.attendance_id = t.attendance_id
+        LEFT JOIN lectures   l ON l.lecture_id    = a.lecture_id
+        WHERE t.student_id = ? ORDER BY t.created_at DESC LIMIT 50`, [id]);
+      log("ME", "Profile fetched", { studentId: id });
+      return send(res, 200, { studentId: s.student_id, name: s.full_name, email: s.email, points: s.total_points, history });
+    }
+
+    // POST /api/claim-reward
+    if (req.method === "POST" && pathname === "/api/claim-reward") {
+      const { studentId, code } = await readBody(req);
+      const id        = norm(studentId);
+      const lectureId = (code || "").trim().toUpperCase();
+      const s = await q("SELECT student_id, total_points FROM students WHERE student_id = ?", [id]);
+      if (!s)         return send(res, 401, { message: "Not authenticated." });
+      if (!lectureId) return send(res, 400, { message: "Empty QR code." });
+      const lec = await q("SELECT lecture_id, attendance_open FROM lectures WHERE lecture_id = ?", [lectureId]);
+      if (!lec)               return send(res, 404, { message: `Lecture ${lectureId} not found.` });
+      if (!lec.attendance_open) return send(res, 403, { message: "Attendance is closed." });
+      const dup = await q("SELECT 1 FROM attendance WHERE student_id = ? AND lecture_id = ?", [id, lectureId]);
+      if (dup) { log("CLAIM:DUP", "Duplicate", { id, lectureId }); return send(res, 409, { message: "Already checked in." }); }
+
+      const ts    = Date.now();
+      const attId = `ATT-${id}-${lectureId}-${ts}`;
+      const txId  = `TX-${id}-${lectureId}-${ts}`;
+      await qr("INSERT INTO attendance (attendance_id,lecture_id,student_id,attendance_date,check_in_time,status,base_points,counts_for_streak,token_created) VALUES (?,?,?,date('now'),datetime('now'),'Present',?,1,1)",
+        [attId, lectureId, id, POINTS_PER_SCAN]);
+      await qr("INSERT INTO token_transactions (transaction_id,student_id,attendance_id,transaction_type,points,transaction_date,status) VALUES (?,?,?,'Attendance',?,date('now'),'Confirmed')",
+        [txId, id, attId, POINTS_PER_SCAN]);
+      await qr("UPDATE students SET total_points = total_points + ? WHERE student_id = ?", [POINTS_PER_SCAN, id]);
+      const updated = await q("SELECT total_points FROM students WHERE student_id = ?", [id]);
+      log("CLAIM:OK", "Points awarded", { studentId: id, lectureId, awarded: POINTS_PER_SCAN, total: updated.total_points });
+      return send(res, 200, { awarded: POINTS_PER_SCAN, points: updated.total_points, message: `+${POINTS_PER_SCAN} points added` });
+    }
+
+    // GET /api/visit
+    if (req.method === "GET" && pathname === "/api/visit") {
+      const id        = norm(query.studentId);
+      const lectureId = (query.lectureId || "").trim().toUpperCase();
+      const target    = (query.target    || "/").trim();
+      const ip        = (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
+      const ua        = (req.headers["user-agent"] || "").slice(0, 500);
+      await qr("INSERT INTO visit_log (student_id,lecture_id,target_url,ip_address,user_agent) VALUES (?,?,?,?,?)",
+        [id || null, lectureId || null, target, ip, ua]);
+      log("VISIT", "Link clicked", { studentId: id || "(anon)", lectureId: lectureId || "(none)", target });
+      return redirect(res, target);
+    }
+
+    send(res, 404, { message: "Not found" });
+
+  } catch (err) {
+    log("ERROR", err.message);
+    send(res, 500, { message: "Internal server error." });
   }
 
-  claimed.add(ledgerKey);
-  student.points += POINTS_PER_SCAN;
-  student.history.unshift({
-    code,
-    points: POINTS_PER_SCAN,
-    at: new Date().toISOString(),
-  });
-
-  return res.json({
-    awarded: POINTS_PER_SCAN,
-    points: student.points,
-    message: `+${POINTS_PER_SCAN} points added`,
-  });
-});
-
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`QR Rewards API listening on http://localhost:${PORT}`);
+}).listen(process.env.PORT || 4000, () => {
+  log("SERVER", `Up on http://localhost:${process.env.PORT || 4000} — sqlite3 (${DB_PATH})`);
 });
