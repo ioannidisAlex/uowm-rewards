@@ -75,7 +75,7 @@ function WalletSection({ studentId }) {
               rel="noreferrer"
               className="font-mono text-xs text-lime underline underline-offset-2"
             >
-              View on Etherscan ↗
+              {explorerUrl.includes("polygonscan") ? "View on Polygonscan ↗" : "View on Etherscan ↗"}
             </a>
           )}
           <button
@@ -95,27 +95,23 @@ function WalletSection({ studentId }) {
   // ── Mode A: no wallet — show opt-in prompt ───────────────────────────────────
   return (
     <section className="mt-6 rounded-2xl border border-dashed border-white/10 px-5 py-4">
-      <p className="font-mono text-xs uppercase tracking-widest text-mist">
-        Blockchain proof (optional)
-      </p>
-      <p className="mt-1 font-display text-xs text-mist">
-        Connect MetaMask to mint your attendance points as on-chain tokens. Points are always
-        recorded here — this is purely additive.
+      <p className="font-mono text-xs uppercase tracking-widest text-mist">On-chain proof (optional)</p>
+      <p className="mt-1 font-display text-xs text-mist/70">
+        Connect MetaMask to record your attendance permanently on Polygon Amoy.
       </p>
 
       {!hasMetaMask ? (
-        <p className="mt-3 font-mono text-xs text-mist">
-          MetaMask not detected.{" "}
+        <div className="mt-3">
+          <p className="font-mono text-xs text-mist">MetaMask not detected.</p>
           <a
             href="https://metamask.io/download/"
             target="_blank"
             rel="noreferrer"
-            className="text-lime underline underline-offset-2"
+            className="font-mono text-xs text-lime underline underline-offset-2"
           >
-            Install it ↗
-          </a>{" "}
-          then come back.
-        </p>
+            Install MetaMask ↗
+          </a>
+        </div>
       ) : (
         <button
           onClick={handleConnect}
@@ -171,8 +167,6 @@ export default function Dashboard({ studentId, livePoints }) {
           Every scan adds 50. Keep going.
         </p>
       </section>
-
-      {/* Wallet section — opt-in, rendered below the balance card */}
       <WalletSection studentId={studentId} />
 
       {/* History */}

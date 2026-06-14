@@ -5,7 +5,9 @@ const { ethers } = require("ethers");
 // Minimal ABI — only the functions the server needs to call.
 const ABI = [
   "function awardAttendance(address student, uint256 points, string lectureId) external",
+  "function recordAttendance(string studentId, string lectureId) external",
   "event AttendanceRecorded(address indexed student, uint256 points, string lectureId, uint256 timestamp)",
+  "event AttendanceLogged(string studentId, string lectureId, uint256 timestamp)",
 ];
 
 let contract = null;
@@ -25,10 +27,11 @@ function init() {
     return;
   }
 
-  const rpcUrl = SEPOLIA_RPC_URL || AMOY_RPC_URL;
+  const rpcUrl  = AMOY_RPC_URL || SEPOLIA_RPC_URL;
+  const network = AMOY_RPC_URL ? "Polygon Amoy" : "Sepolia";
   if (!rpcUrl || !DEPLOYER_PRIVATE_KEY || !CONTRACT_ADDRESS) {
     console.warn("[BLOCKCHAIN] Missing env vars — on-chain minting disabled");
-    console.warn("  Required: SEPOLIA_RPC_URL (or AMOY_RPC_URL), DEPLOYER_PRIVATE_KEY, CONTRACT_ADDRESS");
+    console.warn("  Required: AMOY_RPC_URL, DEPLOYER_PRIVATE_KEY, CONTRACT_ADDRESS");
     return;
   }
 
@@ -37,7 +40,7 @@ function init() {
     const wallet   = new ethers.Wallet(DEPLOYER_PRIVATE_KEY, provider);
     contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, wallet);
     enabled  = true;
-    console.log("[BLOCKCHAIN] Connected — contract:", CONTRACT_ADDRESS);
+    console.log(`[BLOCKCHAIN] Connected on ${network} — contract: ${CONTRACT_ADDRESS}`);
   } catch (err) {
     console.error("[BLOCKCHAIN] Init failed:", err.message);
   }
@@ -82,4 +85,23 @@ function verifyWalletSignature(walletAddress, signature, message) {
   }
 }
 
-module.exports = { init, awardOnChain, verifyWalletSignature, isEnabled: () => enabled };
+/**
+ * Record attendance on-chain for a student who has no wallet address.
+ * Emits an AttendanceLogged event — no tokens minted, no address needed.
+ */
+async function recordAttendanceOnChain(studentId, lectureId) {
+  if (!enabled || !contract) return null;
+  try {
+    const tx = await contract.recordAttendance(studentId, lectureId);
+    console.log(`[BLOCKCHAIN] LOG TX submitted ${tx.hash} | ${lectureId} -> ${studentId}`);
+    tx.wait(1)
+      .then(() => console.log(`[BLOCKCHAIN] LOG TX confirmed ${tx.hash}`))
+      .catch((err) => console.error(`[BLOCKCHAIN] LOG TX failed ${tx.hash}:`, err.message));
+    return tx.hash;
+  } catch (err) {
+    console.error("[BLOCKCHAIN] recordAttendance error:", err.message);
+    return null;
+  }
+}
+
+module.exports = { init, awardOnChain, recordAttendanceOnChain, verifyWalletSignature, isEnabled: () => enabled };

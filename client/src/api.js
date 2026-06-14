@@ -37,7 +37,7 @@ export function login(studentId) {
 }
 
 export function fetchMe(studentId) {
-  return fetch(`/wallet/${encodeURIComponent(studentId)}`).then(asJson);
+  return fetch(`/api/me?studentId=${encodeURIComponent(studentId)}`).then(asJson);
 }
 
 export function submitScan(studentId, code) {

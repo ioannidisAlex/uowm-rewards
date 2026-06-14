@@ -62,7 +62,7 @@ function send(res, status, body) {
     "Content-Type": "application/json",
     "Content-Length": Buffer.byteLength(p),
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(p);
@@ -87,7 +87,7 @@ http.createServer(async (req, res) => {
   const { pathname, query } = url.parse(req.url, true);
 
   if (req.method === "OPTIONS") {
-    res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" });
+    res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" });
     return res.end();
   }
 
@@ -151,30 +151,15 @@ http.createServer(async (req, res) => {
       const updated = await q("SELECT total_points FROM students WHERE student_id = ?", [id]);
       log("CLAIM:OK", "Points awarded", { studentId: id, lectureId, awarded: POINTS_PER_SCAN, total: updated.total_points });
 
-      // Mint on-chain — fire-and-forget, response is not delayed
-      blockchain.awardOnChain(s.wallet_address, POINTS_PER_SCAN, lectureId).then((txHash) => {
+      // Record on-chain — fire-and-forget: mint tokens if wallet connected, log event otherwise
+      (s.wallet_address
+        ? blockchain.awardOnChain(s.wallet_address, POINTS_PER_SCAN, lectureId)
+        : blockchain.recordAttendanceOnChain(id, lectureId)
+      ).then((txHash) => {
         if (txHash) qr("UPDATE token_transactions SET blockchain_hash=? WHERE transaction_id=?", [txHash, txId]);
       });
 
       return send(res, 200, { awarded: POINTS_PER_SCAN, points: updated.total_points, message: `+${POINTS_PER_SCAN} points added` });
-    }
-
-    // GET /wallet/:studentId
-    const walletMatch = pathname.match(/^\/wallet\/(.+)$/);
-    if (req.method === "GET" && walletMatch) {
-      const id = norm(walletMatch[1]);
-      if (!id) return send(res, 400, { message: "Student ID is required." });
-      const s = await q("SELECT student_id, full_name, email, total_points, role FROM students WHERE student_id = ?", [id]);
-      if (!s) return send(res, 404, { message: "Student not found." });
-      const history = await qa(`
-        SELECT t.transaction_id, t.transaction_type, t.points, t.transaction_date,
-               l.lecture_id, l.topic
-        FROM token_transactions t
-        LEFT JOIN attendance a ON a.attendance_id = t.attendance_id
-        LEFT JOIN lectures   l ON l.lecture_id    = a.lecture_id
-        WHERE t.student_id = ? ORDER BY t.created_at DESC LIMIT 50`, [id]);
-      log("WALLET", "Wallet fetched", { studentId: id });
-      return send(res, 200, { studentId: s.student_id, name: s.full_name, email: s.email, points: s.total_points, role: s.role, history });
     }
 
     // GET /api/attendance?lectureId=LEC001
@@ -284,8 +269,11 @@ http.createServer(async (req, res) => {
         [POINTS_PER_SCAN, updated.total_points, reqId]);
       log("SCAN:APPROVED", "Points awarded via approval", { studentId: r.student_id, lectureId: r.lecture_id, awarded: POINTS_PER_SCAN, total: updated.total_points });
 
-      // Mint on-chain — fire-and-forget
-      blockchain.awardOnChain(student.wallet_address, POINTS_PER_SCAN, r.lecture_id).then((txHash) => {
+      // Record on-chain — fire-and-forget: mint tokens if wallet connected, log event otherwise
+      (student.wallet_address
+        ? blockchain.awardOnChain(student.wallet_address, POINTS_PER_SCAN, r.lecture_id)
+        : blockchain.recordAttendanceOnChain(r.student_id, r.lecture_id)
+      ).then((txHash) => {
         if (txHash) qr("UPDATE token_transactions SET blockchain_hash=? WHERE transaction_id=?", [txHash, txId]);
       });
 
@@ -355,7 +343,7 @@ http.createServer(async (req, res) => {
       const id = norm(walletRegMatch[1]);
       const s = await q("SELECT wallet_address FROM students WHERE student_id = ?", [id]);
       if (!s) return send(res, 404, { message: "Student not found." });
-      const network     = process.env.BLOCKCHAIN_NETWORK || "sepolia";
+      const network     = process.env.BLOCKCHAIN_NETWORK || "amoy";
       const explorerUrl = s.wallet_address
         ? (network === "amoy"
             ? `https://amoy.polygonscan.com/address/${s.wallet_address}`
@@ -393,15 +381,16 @@ http.createServer(async (req, res) => {
     if (!blockchain.isEnabled()) return;
     try {
       const rows = await qa(`
-        SELECT t.transaction_id, s.wallet_address, a.lecture_id
+        SELECT t.transaction_id, t.student_id, s.wallet_address, a.lecture_id
         FROM token_transactions t
         JOIN attendance  a ON a.attendance_id = t.attendance_id
         JOIN students    s ON s.student_id    = t.student_id
         WHERE t.blockchain_hash IS NULL
-          AND s.wallet_address  IS NOT NULL
       `);
       for (const row of rows) {
-        const hash = await blockchain.awardOnChain(row.wallet_address, POINTS_PER_SCAN, row.lecture_id);
+        const hash = row.wallet_address
+          ? await blockchain.awardOnChain(row.wallet_address, POINTS_PER_SCAN, row.lecture_id)
+          : await blockchain.recordAttendanceOnChain(row.student_id, row.lecture_id);
         if (hash) await qr("UPDATE token_transactions SET blockchain_hash=? WHERE transaction_id=?", [hash, row.transaction_id]);
       }
       if (rows.length > 0) log("RETRY", `Re-minted ${rows.length} missed transaction(s)`);

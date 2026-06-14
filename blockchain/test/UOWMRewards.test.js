@@ -28,7 +28,7 @@ describe("UOWMRewards", function () {
     });
   });
 
-  describe("awardAttendance", function () {
+  describe("awardAttendance (Path A — wallet connected)", function () {
     it("mints correct token amount (points × 1e18)", async function () {
       const { contract, student1 } = await loadFixture(deploy);
       await contract.awardAttendance(student1.address, 50, "LEC001");
@@ -63,9 +63,7 @@ describe("UOWMRewards", function () {
       expect(await contract.balanceOf(student1.address)).to.equal(50n * 10n ** 18n);
       expect(await contract.balanceOf(student2.address)).to.equal(50n * 10n ** 18n);
     });
-  });
 
-  describe("Double-mint protection", function () {
     it("reverts on duplicate (student, lectureId) pair", async function () {
       const { contract, student1 } = await loadFixture(deploy);
       await contract.awardAttendance(student1.address, 50, "LEC001");
@@ -95,6 +93,51 @@ describe("UOWMRewards", function () {
       expect(await contract.hasMinted(student1.address, "LEC001")).to.be.false;
       await contract.awardAttendance(student1.address, 50, "LEC001");
       expect(await contract.hasMinted(student1.address, "LEC001")).to.be.true;
+    });
+  });
+
+  describe("recordAttendance (Path B — no wallet)", function () {
+    it("emits AttendanceLogged event", async function () {
+      const { contract } = await loadFixture(deploy);
+      await expect(contract.recordAttendance("mst01081", "LEC001"))
+        .to.emit(contract, "AttendanceLogged")
+        .withArgs("mst01081", "LEC001", (ts) => ts > 0n);
+    });
+
+    it("does not mint any tokens", async function () {
+      const { contract } = await loadFixture(deploy);
+      await contract.recordAttendance("mst01081", "LEC001");
+      expect(await contract.totalSupply()).to.equal(0n);
+    });
+
+    it("reverts on duplicate (studentId, lectureId) pair", async function () {
+      const { contract } = await loadFixture(deploy);
+      await contract.recordAttendance("mst01081", "LEC001");
+      await expect(
+        contract.recordAttendance("mst01081", "LEC001")
+      ).to.be.revertedWith("UOWMP: already logged for this lecture");
+    });
+
+    it("allows same lecture for a different student ID", async function () {
+      const { contract } = await loadFixture(deploy);
+      await contract.recordAttendance("mst01081", "LEC001");
+      await expect(
+        contract.recordAttendance("mst01082", "LEC001")
+      ).to.not.be.reverted;
+    });
+
+    it("reverts when called by non-owner", async function () {
+      const { contract, student1 } = await loadFixture(deploy);
+      await expect(
+        contract.connect(student1).recordAttendance("mst01081", "LEC001")
+      ).to.be.revertedWithCustomError(contract, "OwnableUnauthorizedAccount");
+    });
+
+    it("hasLogged returns true after log, false before", async function () {
+      const { contract } = await loadFixture(deploy);
+      expect(await contract.hasLogged("mst01081", "LEC001")).to.be.false;
+      await contract.recordAttendance("mst01081", "LEC001");
+      expect(await contract.hasLogged("mst01081", "LEC001")).to.be.true;
     });
   });
 

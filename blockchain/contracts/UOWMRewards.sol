@@ -7,11 +7,16 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 /**
  * UOWM Rewards Points (UOWMP)
  *
- * Soulbound ERC-20: tokens are non-transferable and can only be minted
- * by the contract owner (the server wallet) when a student attends a lecture.
+ * Two on-chain paths, both permanent and tamper-proof:
  *
- * Each lecture attendance mints `points * 1e18` tokens and emits an
- * AttendanceRecorded event that serves as a permanent, verifiable proof.
+ *   awardAttendance  — student has a MetaMask wallet: mints ERC-20 tokens TO
+ *                      their address and emits AttendanceRecorded.
+ *
+ *   recordAttendance — student has no wallet yet: emits AttendanceLogged with
+ *                      their student ID so the attendance still hits the chain.
+ *
+ * Either way, every scan produces a transaction hash stored in SQLite and
+ * verifiable on Polygonscan forever.
  */
 contract UOWMRewards is ERC20, Ownable {
 
@@ -22,17 +27,21 @@ contract UOWMRewards is ERC20, Ownable {
         uint256 timestamp
     );
 
-    // keccak256(student, lectureId) → already minted
-    mapping(bytes32 => bool) private _minted;
+    event AttendanceLogged(
+        string studentId,
+        string lectureId,
+        uint256 timestamp
+    );
+
+    mapping(bytes32 => bool) private _minted;  // keyed on (address, lectureId)
+    mapping(bytes32 => bool) private _logged;  // keyed on (studentId, lectureId)
 
     constructor(address initialOwner)
         ERC20("UOWM Rewards Points", "UOWMP")
         Ownable(initialOwner)
     {}
 
-    // -------------------------------------------------------------------------
-    // Minting — only the server wallet (owner) can call this
-    // -------------------------------------------------------------------------
+    // ── Path A: student has a wallet ─────────────────────────────────────────
 
     function awardAttendance(
         address student,
@@ -46,14 +55,27 @@ contract UOWMRewards is ERC20, Ownable {
         emit AttendanceRecorded(student, points, lectureId, block.timestamp);
     }
 
-    // Read-only: check whether a mint already happened for a (student, lecture) pair
     function hasMinted(address student, string calldata lectureId) external view returns (bool) {
         return _minted[keccak256(abi.encodePacked(student, lectureId))];
     }
 
-    // -------------------------------------------------------------------------
-    // Soulbound: block all transfers so points can't be traded or gifted
-    // -------------------------------------------------------------------------
+    // ── Path B: student has no wallet — log attendance without minting ────────
+
+    function recordAttendance(
+        string calldata studentId,
+        string calldata lectureId
+    ) external onlyOwner {
+        bytes32 key = keccak256(abi.encodePacked(studentId, lectureId));
+        require(!_logged[key], "UOWMP: already logged for this lecture");
+        _logged[key] = true;
+        emit AttendanceLogged(studentId, lectureId, block.timestamp);
+    }
+
+    function hasLogged(string calldata studentId, string calldata lectureId) external view returns (bool) {
+        return _logged[keccak256(abi.encodePacked(studentId, lectureId))];
+    }
+
+    // ── Soulbound: block all transfers ────────────────────────────────────────
 
     function transfer(address, uint256) public pure override returns (bool) {
         revert("UOWMP: soulbound, non-transferable");
