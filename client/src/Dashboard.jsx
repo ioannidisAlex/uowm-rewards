@@ -18,7 +18,12 @@ export default function Dashboard({ studentId, livePoints }) {
         <p className="font-mono text-xs uppercase tracking-widest text-mist">
           Signed in as
         </p>
-        <h2 className="font-display text-2xl font-bold text-white">{studentId}</h2>
+        <h2 className="font-display text-2xl font-bold text-white">
+          {data?.name ?? studentId}
+        </h2>
+        {data?.name && (
+          <p className="font-mono text-xs text-mist">{studentId}</p>
+        )}
       </header>
 
       {/* Balance card */}
@@ -56,10 +61,9 @@ export default function Dashboard({ studentId, livePoints }) {
                 className="flex items-center justify-between rounded-2xl bg-ink2 px-4 py-3 ring-1 ring-white/5"
               >
                 <div className="min-w-0">
-                  <p className="truncate font-mono text-sm text-white">{h.code}</p>
-                  <p className="font-mono text-xs text-mist">
-                    {new Date(h.at).toLocaleString()}
-                  </p>
+                  <p className="font-mono text-xs font-semibold text-lime">{h.lecture_id}</p>
+                  <p className="truncate font-display text-sm text-white">{h.topic}</p>
+                  <p className="font-mono text-xs text-mist">{h.transaction_date}</p>
                 </div>
                 <span className="shrink-0 font-display font-bold text-lime">
                   +{h.points}

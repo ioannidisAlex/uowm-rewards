@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import Gatekeeper from "./Gatekeeper";
 import Scanner from "./Scanner";
 import Dashboard from "./Dashboard";
+import LectureQRs from "./LectureQRs";
 import { getStoredStudentId, clearStoredStudentId } from "./api";
 
 export default function App() {
@@ -43,28 +44,17 @@ export default function App() {
 
       {/* Active view */}
       <div className="flex flex-1 flex-col pb-24">
-        {tab === "scan" ? (
-          <Scanner studentId={studentId} onPointsChanged={handlePointsChanged} />
-        ) : (
-          <Dashboard studentId={studentId} livePoints={livePoints} />
-        )}
+        {tab === "scan" && <Scanner studentId={studentId} onPointsChanged={handlePointsChanged} />}
+        {tab === "dash" && <Dashboard studentId={studentId} livePoints={livePoints} />}
+        {tab === "qr"   && <LectureQRs />}
       </div>
 
       {/* Bottom tab bar */}
       <nav className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-md border-t border-white/10 bg-ink2/95 backdrop-blur">
-        <div className="grid grid-cols-2">
-          <TabButton
-            active={tab === "scan"}
-            onClick={() => setTab("scan")}
-            label="Scan"
-            icon="◎"
-          />
-          <TabButton
-            active={tab === "dash"}
-            onClick={() => setTab("dash")}
-            label="Points"
-            icon="▦"
-          />
+        <div className="grid grid-cols-3">
+          <TabButton active={tab === "scan"} onClick={() => setTab("scan")} label="Scan"   icon="◎" />
+          <TabButton active={tab === "dash"} onClick={() => setTab("dash")} label="Points" icon="▦" />
+          <TabButton active={tab === "qr"}   onClick={() => setTab("qr")}   label="QR"     icon="⊞" />
         </div>
       </nav>
     </div>
