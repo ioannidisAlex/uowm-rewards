@@ -40,10 +40,6 @@ Open `http://localhost:5173` on your phone (same network) or in a desktop browse
 Camera access requires `https://` or `localhost` — for phone testing use a tunnel
 (e.g. ngrok) or your machine's LAN IP over HTTPS.
 
-### Demo IDs
-
-- `mst01081` — starts at 0 points
-- `mst02042` — starts at 120 points
 
 Each QR code can only be claimed once per student; rescanning the same code
 triggers the "already used" banner.

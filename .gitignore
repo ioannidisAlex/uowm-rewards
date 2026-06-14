@@ -6,6 +6,7 @@ client/dist/
 client/.vite/
 blockchain/artifacts/
 blockchain/cache/
+*.env.example
 
 # Environment & secrets
 .env

@@ -68,4 +68,18 @@ async function awardOnChain(walletAddress, points, lectureId) {
   }
 }
 
-module.exports = { init, awardOnChain, isEnabled: () => enabled };
+/**
+ * Verify that `signature` was produced by signing `message` with the private
+ * key that controls `walletAddress`. Works with MetaMask's personal_sign.
+ * Returns true only if the recovered address matches exactly.
+ */
+function verifyWalletSignature(walletAddress, signature, message) {
+  try {
+    const recovered = ethers.verifyMessage(message, signature);
+    return recovered.toLowerCase() === walletAddress.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { init, awardOnChain, verifyWalletSignature, isEnabled: () => enabled };

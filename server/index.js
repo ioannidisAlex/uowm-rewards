@@ -4,8 +4,25 @@ const http       = require("http");
 const url        = require("url");
 const path       = require("path");
 const sqlite3    = require("sqlite3").verbose();
+const crypto     = require("crypto");
 const blockchain = require("./blockchain");
 blockchain.init();
+
+// In-memory nonce store for MetaMask wallet verification.
+// Each entry expires after 10 minutes so stale challenges can't be replayed.
+const _nonces = new Map();
+function issueNonce(studentId) {
+  const nonce = crypto.randomBytes(16).toString("hex");
+  _nonces.set(studentId, { nonce, expiresAt: Date.now() + 10 * 60 * 1000 });
+  return nonce;
+}
+function consumeNonce(studentId, nonce) {
+  const entry = _nonces.get(studentId);
+  if (!entry) return false;
+  _nonces.delete(studentId); // one-time use regardless of outcome
+  if (Date.now() > entry.expiresAt) return false;
+  return entry.nonce === nonce;
+}
 
 const DB_PATH = path.join(__dirname, "./db/uowm_rewards.db");
 const db      = new sqlite3.Database(DB_PATH, (err) => {
@@ -287,19 +304,49 @@ http.createServer(async (req, res) => {
       return send(res, 200, {});
     }
 
-    // POST /api/wallet — student registers their MetaMask wallet address
+    // GET /api/wallet/nonce — step 1: client requests a one-time challenge to sign
+    if (req.method === "GET" && pathname === "/api/wallet/nonce") {
+      const id = norm(query.studentId);
+      if (!id) return send(res, 400, { message: "studentId required." });
+      const s = await q("SELECT student_id FROM students WHERE student_id = ?", [id]);
+      if (!s) return send(res, 404, { message: "Student not found." });
+      const nonce   = issueNonce(id);
+      const message = `Connect your wallet to UOWM Rewards.\nStudent: ${id}\nNonce: ${nonce}`;
+      return send(res, 200, { nonce, message });
+    }
+
+    // POST /api/wallet — step 2: client sends address + MetaMask signature to prove ownership
     if (req.method === "POST" && pathname === "/api/wallet") {
-      const { studentId, walletAddress } = await readBody(req);
+      const { studentId, walletAddress, signature, nonce } = await readBody(req);
       const id = norm(studentId);
       if (!id) return send(res, 401, { message: "Not authenticated." });
       const { ethers } = require("ethers");
       if (!walletAddress || !ethers.isAddress(walletAddress))
         return send(res, 400, { message: "Invalid Ethereum address." });
+      if (!signature || !nonce)
+        return send(res, 400, { message: "signature and nonce are required." });
       const s = await q("SELECT student_id FROM students WHERE student_id = ?", [id]);
       if (!s) return send(res, 401, { message: "Not authenticated." });
+      if (!consumeNonce(id, nonce))
+        return send(res, 400, { message: "Nonce invalid or expired. Request a new one." });
+      const message = `Connect your wallet to UOWM Rewards.\nStudent: ${id}\nNonce: ${nonce}`;
+      if (!blockchain.verifyWalletSignature(walletAddress, signature, message))
+        return send(res, 401, { message: "Signature does not match wallet address." });
       await qr("UPDATE students SET wallet_address = ? WHERE student_id = ?", [walletAddress, id]);
-      log("WALLET:SET", "Wallet registered", { studentId: id, walletAddress });
+      log("WALLET:VERIFIED", "Wallet ownership proved and registered", { studentId: id, walletAddress });
       return send(res, 200, { walletAddress });
+    }
+
+    // DELETE /api/wallet — student disconnects / removes their wallet
+    if (req.method === "DELETE" && pathname === "/api/wallet") {
+      const { studentId } = await readBody(req);
+      const id = norm(studentId);
+      if (!id) return send(res, 401, { message: "Not authenticated." });
+      const s = await q("SELECT student_id FROM students WHERE student_id = ?", [id]);
+      if (!s) return send(res, 401, { message: "Not authenticated." });
+      await qr("UPDATE students SET wallet_address = NULL WHERE student_id = ?", [id]);
+      log("WALLET:REMOVED", "Wallet disconnected", { studentId: id });
+      return send(res, 200, {});
     }
 
     // GET /api/wallet/:studentId — fetch a student's registered wallet + on-chain explorer link
@@ -339,4 +386,30 @@ http.createServer(async (req, res) => {
 
 }).listen(process.env.PORT || 4000, () => {
   log("SERVER", `Up on http://localhost:${process.env.PORT || 4000} — sqlite3 (${DB_PATH})`);
+
+  // Re-attempt any point awards that were recorded in SQLite but never reached the chain
+  // (e.g. server crash, RPC timeout). The contract's _minted guard makes retries idempotent.
+  async function retryUnmintedTransactions() {
+    if (!blockchain.isEnabled()) return;
+    try {
+      const rows = await qa(`
+        SELECT t.transaction_id, s.wallet_address, a.lecture_id
+        FROM token_transactions t
+        JOIN attendance  a ON a.attendance_id = t.attendance_id
+        JOIN students    s ON s.student_id    = t.student_id
+        WHERE t.blockchain_hash IS NULL
+          AND s.wallet_address  IS NOT NULL
+      `);
+      for (const row of rows) {
+        const hash = await blockchain.awardOnChain(row.wallet_address, POINTS_PER_SCAN, row.lecture_id);
+        if (hash) await qr("UPDATE token_transactions SET blockchain_hash=? WHERE transaction_id=?", [hash, row.transaction_id]);
+      }
+      if (rows.length > 0) log("RETRY", `Re-minted ${rows.length} missed transaction(s)`);
+    } catch (err) {
+      log("RETRY:ERR", err.message);
+    }
+  }
+
+  retryUnmintedTransactions();
+  setInterval(retryUnmintedTransactions, 5 * 60 * 1000); // re-check every 5 minutes
 });

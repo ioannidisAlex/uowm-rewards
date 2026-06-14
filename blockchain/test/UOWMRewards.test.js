@@ -65,6 +65,39 @@ describe("UOWMRewards", function () {
     });
   });
 
+  describe("Double-mint protection", function () {
+    it("reverts on duplicate (student, lectureId) pair", async function () {
+      const { contract, student1 } = await loadFixture(deploy);
+      await contract.awardAttendance(student1.address, 50, "LEC001");
+      await expect(
+        contract.awardAttendance(student1.address, 50, "LEC001")
+      ).to.be.revertedWith("UOWMP: already minted for this lecture");
+    });
+
+    it("allows same lecture for a different student", async function () {
+      const { contract, student1, student2 } = await loadFixture(deploy);
+      await contract.awardAttendance(student1.address, 50, "LEC001");
+      await expect(
+        contract.awardAttendance(student2.address, 50, "LEC001")
+      ).to.not.be.reverted;
+    });
+
+    it("allows same student for a different lecture", async function () {
+      const { contract, student1 } = await loadFixture(deploy);
+      await contract.awardAttendance(student1.address, 50, "LEC001");
+      await expect(
+        contract.awardAttendance(student1.address, 50, "LEC002")
+      ).to.not.be.reverted;
+    });
+
+    it("hasMinted returns true after mint, false before", async function () {
+      const { contract, student1 } = await loadFixture(deploy);
+      expect(await contract.hasMinted(student1.address, "LEC001")).to.be.false;
+      await contract.awardAttendance(student1.address, 50, "LEC001");
+      expect(await contract.hasMinted(student1.address, "LEC001")).to.be.true;
+    });
+  });
+
   describe("Soulbound — transfers blocked", function () {
     it("reverts transfer()", async function () {
       const { contract, student1, student2 } = await loadFixture(deploy);

@@ -83,3 +83,29 @@ export function fetchAdminStudents() {
 export function fetchAdminTransactions() {
   return fetch("/api/admin/transactions").then(asJson);
 }
+
+// ── Blockchain / MetaMask (optional) ─────────────────────────────────────────
+
+export function fetchWalletInfo(studentId) {
+  return fetch(`/api/wallet/${encodeURIComponent(studentId)}`).then(asJson);
+}
+
+export function fetchWalletNonce(studentId) {
+  return fetch(`/api/wallet/nonce?studentId=${encodeURIComponent(studentId)}`).then(asJson);
+}
+
+export function registerWallet(studentId, walletAddress, signature, nonce) {
+  return fetch("/api/wallet", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ studentId, walletAddress, signature, nonce }),
+  }).then(asJson);
+}
+
+export function disconnectWallet(studentId) {
+  return fetch("/api/wallet", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ studentId }),
+  }).then(asJson);
+}

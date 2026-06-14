@@ -194,7 +194,7 @@ async function setup() {
   // TEACHERS & ADMIN
   const staff = [
     ["tchr001", "ΑΝΤΩΝΙΑΔΗΣ ΙΩΑΝΝΗΣ",       "tchr001@uowm.gr", "teacher"],
-    ["tchr002", "ΚΑΘΗΓΗΤΗΣ",     "tchr002@uowm.gr", "teacher"],
+    ["tchr002", "ΚΩΝΣΤΑΝΤΙΝΟΣ ΠΑΝΥΤΣΙΔΗΣ",     "tchr002@uowm.gr", "teacher"],
     ["admin",   "ΔΙΑΧΕΙΡΙΣΤΗΣ ΣΥΣΤΗΜΑΤΟΣ",     "admin@uowm.gr",   "admin"],
   ];
   for (const [id, name, email, role] of staff)

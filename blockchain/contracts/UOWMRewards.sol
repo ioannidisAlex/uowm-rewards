@@ -22,6 +22,9 @@ contract UOWMRewards is ERC20, Ownable {
         uint256 timestamp
     );
 
+    // keccak256(student, lectureId) → already minted
+    mapping(bytes32 => bool) private _minted;
+
     constructor(address initialOwner)
         ERC20("UOWM Rewards Points", "UOWMP")
         Ownable(initialOwner)
@@ -36,8 +39,16 @@ contract UOWMRewards is ERC20, Ownable {
         uint256 points,
         string calldata lectureId
     ) external onlyOwner {
+        bytes32 key = keccak256(abi.encodePacked(student, lectureId));
+        require(!_minted[key], "UOWMP: already minted for this lecture");
+        _minted[key] = true;
         _mint(student, points * 1e18);
         emit AttendanceRecorded(student, points, lectureId, block.timestamp);
+    }
+
+    // Read-only: check whether a mint already happened for a (student, lecture) pair
+    function hasMinted(address student, string calldata lectureId) external view returns (bool) {
+        return _minted[keccak256(abi.encodePacked(student, lectureId))];
     }
 
     // -------------------------------------------------------------------------

@@ -24,15 +24,13 @@ export default function Gatekeeper({ onEnter }) {
     <main className="flex min-h-dvh flex-col justify-between bg-ink px-6 pb-10 pt-16 text-white">
       <div>
         {/* Eyebrow encodes the action, not decoration */}
-        <p className="font-mono text-xs uppercase tracking-[0.35em] text-lime">
-          Scan · Earn · Climb
-        </p>
+        <p> </p>
         <h1 className="mt-5 font-display text-5xl font-bold leading-[0.95]">
-          Points start
+          Engage More.
           <br />
-          <span className="text-lime">the moment</span>
+          <span className="text-lime">Achieve More.</span>
           <br />
-          you check in.
+          Earn More.
         </h1>
         <p className="mt-4 max-w-xs font-display text-mist">
           Enter your student ID to open your scanner and start collecting.
@@ -55,7 +53,7 @@ export default function Gatekeeper({ onEnter }) {
           inputMode="text"
           value={id}
           onChange={(e) => setId(e.target.value)}
-          placeholder="mst01081"
+          placeholder="mst12345"
           className="w-full rounded-2xl border border-white/10 bg-ink2 px-5 py-4 font-mono text-xl
             text-white placeholder:text-mist/40 outline-none transition
             focus:border-lime focus:ring-4 focus:ring-lime/20"
@@ -76,7 +74,7 @@ export default function Gatekeeper({ onEnter }) {
           {m.isPending ? "Checking…" : "Begin"}
         </button>
         <p className="mt-4 text-center font-mono text-xs text-mist/60">
-          Try <span className="text-lime">mst01081</span>
+          Try <span className="text-lime">mst12345</span>
         </p>
       </form>
     </main>

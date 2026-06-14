@@ -74,6 +74,16 @@ export default function Scanner({ studentId, onPointsChanged }) {
     resumeCamera();
   }
 
+  // Suppress the AbortError that html5-qrcode's internal play() emits when
+  // React StrictMode unmounts the camera mid-start. Scoped to Scanner's lifetime.
+  useEffect(() => {
+    function onUnhandledRejection(e) {
+      if (e.reason?.name === "AbortError") e.preventDefault();
+    }
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => window.removeEventListener("unhandledrejection", onUnhandledRejection);
+  }, []);
+
   // ── camera lifecycle ──────────────────────────────────────────────────────────
   useEffect(() => {
     let isMounted    = true;
@@ -103,10 +113,13 @@ export default function Scanner({ studentId, onPointsChanged }) {
       isMounted = false;
       startedRef.current = false;
       const inst = scannerRef.current;
+      scannerRef.current = null;
       if (inst && startPromise) {
+        // stop() before clear() on every path (success or failure).
+        // The trailing .catch() silences the AbortError that .finally() re-throws.
         startPromise
-          .then(() => inst.stop().catch(() => {}).finally(() => inst.clear?.()))
-          .catch(() => inst.clear?.());
+          .finally(() => inst.stop().catch(() => {}).finally(() => inst.clear?.()))
+          .catch(() => {});
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

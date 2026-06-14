@@ -33,7 +33,7 @@ export default function App() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-ink text-white">
       <div className="relative z-20 flex items-center justify-between px-6 pt-6">
-        <span className="font-mono text-xs uppercase tracking-[0.3em] text-lime">QR Rewards</span>
+        <span className="font-mono text-xs uppercase tracking-[0.3em] text-lime">UOWM REWARDS</span>
         <button
           onClick={signOut}
           className="font-mono text-xs text-mist underline-offset-4 hover:underline"
